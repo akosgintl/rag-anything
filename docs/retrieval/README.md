@@ -38,6 +38,19 @@ back is good enough, and only then answers — with citations and a groundedness
 - Documents have already been ingested and chunked. Ingestion is described conceptually
   (Section 6) but the live system here is the **query/answer path**.
 - We want a design that is *conceptual first* but maps 1:1 onto code modules without rework.
+- **English-first by default** — multilingual/cross-lingual corpora need a multilingual embedder
+  (matched on both sides) and per-language BM25 analyzers; the `language` metadata field drives that.
+
+**Scope boundary.** This answers *specific-fact and synthesis-over-retrieved-passages* questions. It
+does **not** answer *corpus-global* questions ("summarize the main themes across all documents",
+counting/aggregation) — top-k retrieval is local by construction; global questions need a
+precomputed summary/graph layer at ingestion (GraphRAG-style) registered as another tool. Ideally the
+router recognizes a global question and abstains rather than answering from an unrepresentative sample.
+
+**When this design fits.** The agentic, multi-retriever machinery earns its cost when queries are
+varied (lexical *and* semantic *and* visual; simple *and* multi-hop) over a large heterogeneous
+corpus. For a small homogeneous text corpus, plain top-k dense RAG — or even long-context prompting —
+may beat it; the design degrades gracefully to a fast-path-only, single-retriever configuration.
 
 ---
 
@@ -53,10 +66,13 @@ back is good enough, and only then answers — with citations and a groundedness
    *fast path* to a fully agentic *deliberate path*; a router decides which a given query gets.
 4. **Fail loudly, recover gracefully.** Poor retrieval is detected and corrected (re-query,
    broaden, escalate) rather than silently passed to the generator.
-5. **Grounded by construction.** Generation must cite retrieved evidence; a faithfulness gate
-   checks the answer against its sources before returning.
-6. **Everything is observable.** Each query produces a structured trace (decisions, tool calls,
-   scores, latencies, token costs) for debugging and evaluation.
+5. **Grounded *and* safe by construction.** Generation must cite retrieved evidence; a faithfulness
+   gate checks the answer against its sources, and an independent output-safety gate screens for
+   PII-in-answer and harmful-use before returning (faithful ≠ safe). Retrieved content is treated as
+   data, never instructions — the system's defense against prompt injection from ingested documents.
+6. **Everything is observable — and the loop closes.** Each query produces a structured trace
+   (decisions, tool calls, scores, latencies, token costs) for debugging, evaluation, *live
+   monitoring*, and a user-feedback signal that feeds continuous improvement.
 
 ---
 
@@ -89,6 +105,12 @@ flowchart TD
 The same picture, in words: **understand → improve → plan → retrieve broadly → fuse → rerank →
 judge → (loop if weak) → assemble → generate → verify → return.**
 
+Two caveats this picture hides. The **router is an asymmetric risk**: misrouting a hard query to the
+fast path fails *silently* (no safeguards to notice), so it biases toward caution and the fast path
+keeps an escape-hatch to escalate. And the deliberate path is **several sequential LLM calls**, so
+felt latency is mitigated by streaming intermediate progress ("searching… checking results…"), not
+just the final answer.
+
 ---
 
 ## 4. The three retrieval tools
@@ -112,7 +134,9 @@ on a second pass when the first results look thin.
 These are composable transformers; the router/planner selects which apply.
 
 - **Rewrite / contextualize** — resolve coreference and make the query standalone (critical in
-  multi-turn chat).
+  multi-turn chat). Note this depends on **conversation memory** being managed: long histories are
+  truncated/summarized (default: last N turns + a rolling summary), and that compression bounds what
+  can be resolved; session state has a lifecycle and counts toward cumulative cost.
 - **Expansion** — add synonyms and related terms; disproportionately helps BM25.
 - **HyDE** (Hypothetical Document Embeddings) — generate a plausible answer, embed *that*, and
   search dense with it; closes the question↔passage style gap.
@@ -191,9 +215,14 @@ agent:
   budget: { max_tokens: 60000, max_tool_calls: 12, max_latency_ms: 15000 }
 ```
 
+**Cost is set by the path.** The deliberate path runs several LLM calls (transform, plan, grade,
+generate, critique), so a hard query can cost 5–10× a fast-path one. The `budget` block is the runtime
+throttle; role-routed LLMs (cheap utility model, strong answer model) and caching are the main levers.
+Budget per query *and* per conversation (history re-sent each turn inflates tokens).
+
 ---
 
-## 9. What "good" looks like (evaluation)
+## 9. What "good" looks like (evaluation + operation)
 
 Quality is split so failures are attributable:
 
@@ -201,7 +230,10 @@ Quality is split so failures are attributable:
 - **Generation:** faithfulness/groundedness, answer relevance, citation correctness.
 - **System:** end-to-end latency, token cost, tool-call count, iteration count.
 
-The agent emits the trace these metrics need on every query. See
+The agent emits the trace these metrics need on every query. That same trace serves three jobs:
+offline **eval** (golden set, guards changes), live **monitoring + drift** detection (SLOs, rising
+insufficient/abstention rates, hosted-model drift — guards operation), and a **feedback loop**
+(thumbs/click/edit attached to the trace) that grows the golden set and tunes ranking. See
 [`IMPLEMENTATION.md` §Testing & Evaluation](./IMPLEMENTATION.md).
 
 ---
@@ -222,6 +254,10 @@ The agent emits the trace these metrics need on every query. See
 | **README.md** (this) | Anyone landing on the repo | Conceptual overview |
 | [**ARCHITECTURE.md**](./ARCHITECTURE.md) | Engineers building it | Detailed structure, ports, control flow, alternatives |
 | [**IMPLEMENTATION.md**](./IMPLEMENTATION.md) | Implementers planning the build | High-level stack, phases, module layout |
+
+**Related (the other half of the system):** the [ingestion docs](../ingestion/README.md) produce the
+indices this system reads; the shared domain contract both sides depend on is
+[`../shared/DATA_MODEL.md`](../shared/DATA_MODEL.md).
 
 ---
 

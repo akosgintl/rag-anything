@@ -55,6 +55,7 @@ src/
     ports/                # the interfaces (ARCHITECTURE §3)
       llm.py  embedder.py  search.py  retriever_tool.py  reranker.py
       fusion.py  context_builder.py  generator.py  critique.py  cache.py  telemetry.py
+      guardrail.py  feedback.py     # output-safety gate; user-feedback sink (ARCHITECTURE §3.11)
     usecases/
       answer_question.py  # the orchestrator / agent runtime (ARCHITECTURE §4)
     policies/
@@ -62,6 +63,8 @@ src/
     transformers/         # QueryTransformerPort implementations
       contextualize.py  expand.py  hyde.py  decompose.py  step_back.py
       multi_query.py  self_query.py  modality_router.py
+    prompts/              # versioned, reviewed prompt artifacts (rewrite/HyDE/decompose/grade/
+                          # critique/generate) — application-layer, pinned in the eval RunManifest
     services/             # fusion impls, context-build sub-strategies (MMR, compress, order)
 
   adapters/               # implement ports; only layer that imports SDKs

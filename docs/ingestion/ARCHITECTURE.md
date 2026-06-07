@@ -233,6 +233,17 @@ aligned to transcript segments, anchored to timestamps.
 **Alternatives:** fixed-size · recursive/structural · semantic (embedding-boundary) · layout-based.
 Default structural; semantic chunking is an opt-in upgrade.
 
+**Embed-unit ≠ return-unit (hierarchical chunking).** A policy may embed a *small* unit for precise
+matching while linking it to a *larger* parent for generation — parent-document / auto-merging /
+sentence-window retrieval. This is a chunker policy plus a query-side context-builder that resolves
+children to parents; it directly addresses the precision-vs-context tension that overlap only softens.
+
+**Large-table caveat.** Keeping tables atomic is right for *retrieving* a table, but a very large
+table won't fit usefully in a generator's context and chunk-retrieval can't aggregate over its rows.
+For numeric/aggregation workloads, extract tables to a structured store and answer via a tabular /
+text-to-SQL retriever (registered as another `RetrieverTool` on the query side); optionally index a
+table *summary* for findability while keeping the full table in the blob store.
+
 ### 4.8 `TextEmbedderPort` and `MultimodalEmbedderPort`
 **Shared with the query side** — same interfaces, same configured models (the parity invariant).
 ```text
@@ -360,10 +371,27 @@ surviving chunk still lists all its sources.
 - **Provenance & lineage.** Every chunk keeps its `Anchor` and source id; the ledger records the
   full lineage (source → doc → chunks → stores). This is what the query side cites and what eval
   verifies.
-- **PII / compliance.** Redaction is an enrichment step; license/robots/ToS respected at acquisition;
-  `access_level` set on metadata for downstream ACL enforcement.
-- **Observability & determinism.** Per-stage spans (inputs hashes, timings, costs, success) form an
-  `IngestionRecord`; fakes + fixed fixtures + `ClockPort` let the pipeline run offline in tests.
+- **PII / compliance.** Redaction is an enrichment step; license/robots/ToS respected at acquisition.
+  `access_level` *and* a per-source `license`/permission are set on metadata for downstream ACL and
+  redistribution enforcement. Authenticated ingestion is restricted to sources the operator is
+  entitled to use — capability ≠ right; the operator owns the permissibility decision.
+- **Untrusted content & prompt injection.** *All ingested content is untrusted.* It reaches LLM/VLM
+  calls here (captioner, contextualizer, metadata extractor), so a poisoned caption or section-context
+  is embedded and replayed on every future query — a persistent injection. Defenses: treat extracted
+  text as data-never-instructions (delimit/spotlight) in every enricher prompt, an optional
+  injection-screen `EnricherPort`, and never let retrieved/extracted text drive tool decisions. This
+  trust boundary is shared with the query side (retrieval ARCHITECTURE §6).
+- **Freshness & re-crawl.** Each source carries a freshness policy (TTL / conditional-fetch / event);
+  the scheduler enqueues re-acquisition, and change detection short-circuits unchanged sources before
+  extraction. Removal (404/taken-down/deleted) is detected on re-crawl and retires the source's chunks.
+- **Reindex & migration.** Embedder/schema upgrades use a versioned blue-green reindex backfilled from
+  the stored `NormalizedDocument` blobs (no re-fetch); the ledger's per-chunk embedder + `schema_version`
+  scopes the migration. Breaking changes never happen in place. See [`../shared/DATA_MODEL.md`](../shared/DATA_MODEL.md) §8.
+- **Observability, monitoring & drift.** Per-stage spans (input hashes, timings, costs, success) form an
+  `IngestionRecord`; fakes + fixed fixtures + `ClockPort` let the pipeline run offline in tests. In
+  production the same records drive live monitoring — throughput, cost-per-doc, quarantine rate — and
+  **drift** detection: corpus-distribution shift, and silent vendor updates to *hosted* embedders that
+  would violate the parity invariant (alert on embedding-norm/score-distribution change).
 
 ---
 

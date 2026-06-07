@@ -45,6 +45,20 @@ crawler, parser, captioner, embedder, index) behind an injectable port.
   silently destroys retrieval quality.
 - Ingestion runs as an **offline / batch (or scheduled streaming) job**, separate from the live
   query service, sharing only the embedder ports and metadata schema.
+- **English-first by default.** The default stack is monolingual; multilingual or cross-lingual
+  corpora require a multilingual embedder (matched on the query side per the parity invariant),
+  per-language BM25 analyzers, and language-appropriate OCR/ASR models. The `language` metadata field
+  exists to drive that per-language routing, not as decoration.
+
+### When this design fits (and when it's overkill)
+
+This pipeline earns its complexity when the corpus is **large, heterogeneous, image-rich, and
+re-ingested over time**. For a small, stable, text-only corpus, a single parser + fixed-size chunker
++ one embedder is enough — skip the connectors, triple-indexing, and ledger. Two known boundaries to
+set expectations: **tables are preserved atomically as Markdown** (great for *retrieving* a table,
+but aggregation/numeric-reasoning over large tables needs a separate tabular/text-to-SQL path — see
+[`ARCHITECTURE.md`](./ARCHITECTURE.md) §4.7), and the system indexes *passages*, so corpus-global
+questions ("summarize everything") are a query-side scope boundary, not an ingestion feature.
 
 ---
 
@@ -123,6 +137,13 @@ Sites like Medium and Substack need authenticated fetches. The pipeline does **n
 credentials: a per-domain **auth strategy** (stored session cookies, headers, or a login action)
 is resolved from a **secrets vault** and handed to the crawler. The system uses stored secrets;
 it never improvises credentials. See [`ARCHITECTURE.md` §Acquisition](./ARCHITECTURE.md).
+
+**Compliance is a posture, not a feature.** The *capability* to fetch gated content does not grant
+the *right* to. Authenticated ingestion is restricted to sources the operator is contractually
+entitled to use; robots/ToS are respected as policy (not just crawl politeness); and a per-source
+**license / permission** is recorded in `Metadata` so the query side can refuse to surface content it
+isn't licensed to redistribute (the same mechanism as ACLs). The operator — not the pipeline — owns
+the decision of what is permissible to ingest.
 
 ---
 
@@ -229,6 +250,14 @@ pipeline:
   on_failure: quarantine
 ```
 
+**Cost is a config decision.** The dominant cost centers are **ASR** (every caption-less video),
+**per-image VLM captioning** (cost scales with *media* volume, not document count — an image-heavy
+PDF corpus can cost orders of magnitude more than its page count suggests), and **embeddings**.
+The levers above are largely cost levers: the ledger guarantees at-most-once processing per unchanged
+unit, caching dedupes expensive ASR/VLM/embed calls, and `keyframes`/`extract_images`/`contextualize`
+toggles trade ingestion spend for retrieval quality. Budget per *1k pages* and per *media asset*, not
+per document.
+
 ---
 
 ## 10. Idempotency & incremental ingestion
@@ -239,9 +268,49 @@ reprocessed and their old chunks superseded (upsert by deterministic id); remove
 their chunks retired. Near-duplicate content across sources (the same article mirrored on two
 sites) is collapsed by a dedup step so the index isn't polluted.
 
+### Freshness & re-crawl (when to re-ingest)
+
+Idempotency answers *how to re-ingest cheaply*; **freshness** answers *when*. Each source declares a
+freshness policy — a news feed re-crawls daily, a published PDF essentially never, a video is immutable
+but its channel/playlist gains new items. The scheduler enqueues re-acquisition accordingly, and
+change detection (HTTP conditional requests / ETags, or `content_hash` comparison) short-circuits
+unchanged sources *before* expensive extraction. Removal is detected on re-crawl (404, taken-down
+video, deleted file) and triggers chunk retirement. Freshness is also a cost lever — re-crawling
+isn't free — so it is governed, not global.
+
+### Reindex & migration (changing the embedder or schema)
+
+The parity invariant means you can't swap an embedding model in place — half the index would be in a
+different vector space. Upgrades use a **versioned, blue-green reindex**: stand up a new collection
+embedded with the new model, **backfill it from the stored `NormalizedDocument` blobs** (re-embedding
+needs no re-fetch or re-extract — this is why the blob store exists), evaluate it on the golden set,
+then atomically cut the query side over. The ledger records the embedder *and* `schema_version` per
+chunk so a migration can target exactly the stale chunks. Breaking schema changes follow the same
+path. See the evolution policy in [`../shared/DATA_MODEL.md`](../shared/DATA_MODEL.md) §8.
+
 ---
 
-## 11. Extending the system
+## 11. What "good" looks like (evaluation)
+
+Ingestion quality is *silent* — a mangled table or a dropped image throws no error, it just quietly
+degrades retrieval downstream — so it is measured rigorously. Quality is split by stage so failures
+are attributable:
+
+- **Extraction fidelity:** character/word error rate, heading-structure F1, **TEDS** for tables,
+  image-extraction recall, OCR/ASR accuracy.
+- **Enrichment:** caption quality (VLM-judge rubric + a retrievability proxy), metadata accuracy,
+  contextualization correctness.
+- **Index integrity (hard gates):** completeness/reconciliation across the three stores, the
+  **triple-index** check, the **parity** assertion, and **idempotency** (zero new chunks on re-ingest).
+- **Downstream bridge:** the freshly-ingested corpus is run against the query-side golden set
+  (recall@k / nDCG) — this is where ingestion fidelity cashes out as retrieval quality.
+
+The per-stage telemetry (`IngestionRecord`) is the data source for these metrics. Full harness,
+strata, and regression gates: [`EVALUATION.md`](./EVALUATION.md).
+
+---
+
+## 12. Extending the system
 
 - **New source type** → implement `SourceConnector` (+ an `Extractor`), register it.
 - **New parser / transcriber / captioner / OCR / embedder / index** → write an adapter, point
@@ -251,7 +320,7 @@ sites) is collapsed by a dedup step so the index isn't polluted.
 
 ---
 
-## 12. Document map
+## 13. Document map
 
 | Document | Audience | Depth |
 |----------|----------|-------|
@@ -260,9 +329,13 @@ sites) is collapsed by a dedup step so the index isn't polluted.
 | [**IMPLEMENTATION.md**](./IMPLEMENTATION.md) | Implementers planning the build | High-level stack, phases, layout |
 | [**EVALUATION.md**](./EVALUATION.md) | Anyone validating ingestion quality | Detailed golden-set harness for ingestion |
 
+**Related (the other half of the system):** the [query-side / retrieval docs](../retrieval/README.md)
+consume what this pipeline produces; the shared domain contract both sides depend on is
+[`../shared/DATA_MODEL.md`](../shared/DATA_MODEL.md).
+
 ---
 
-## 13. Glossary
+## 14. Glossary
 
 - **NormalizedDocument** — the canonical Markdown + media + metadata + provenance intermediate
   every source converges on.

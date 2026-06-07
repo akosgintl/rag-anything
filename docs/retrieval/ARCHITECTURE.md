@@ -276,12 +276,19 @@ interface CritiquePort {
 ```
 **Alternatives:** LLM-as-judge (flexible) · NLI model for faithfulness (cheaper, focused) ·
 heuristic (score thresholds, citation coverage). See §5.6.
+**Output safety is a sibling gate.** Faithfulness ≠ safety — a faithfully-quoted harmful or
+PII-laden passage is still harmful. A `screen_output` check (its own dimension or a `GuardrailPort`)
+runs alongside `critique_answer`: PII-in-answer, harmful-use refusal, and a second line of defense
+against a poisoned document that manipulated the generator (see §6, prompt injection).
 
 ### 3.11 Cross-cutting ports
 ```text
 interface CachePort     { get(key)->value?; set(key,value,ttl) }
 interface TelemetryPort { record(event); start_span(name)->span }
 interface ClockPort     { now() }          # determinism in tests
+interface GuardrailPort { screen_input(Query)->Verdict; screen_output(Answer,Context)->Verdict }
+interface FeedbackPort  { record(QueryTrace, outcome)        # thumbs/click/edit/abandon -> sink
+                          # feeds golden-set growth, fusion/rerank tuning, online quality monitoring }
 ```
 
 ### Port → adapter summary
@@ -336,6 +343,12 @@ exact identifiers/quotes (→ BM25), question complexity / multi-hop markers (�
 visual intent (→ multimodal), conversational coreference (→ contextualize first).
 **Alternatives:** LLM classifier (one cheap call, flexible) · embedding-similarity to labeled
 exemplars (no LLM call) · rules/regex (fastest, brittle). *Adaptive RAG* = this router.
+**The router is the highest-risk gate, and asymmetric.** Over-routing (easy query → deliberate) only
+wastes money; *under-routing* (hard query → fast path) answers confidently wrong with none of the
+agentic safeguards, and the fast path has no way to notice. So bias toward caution and give the fast
+path an **escape hatch**: a cheap post-retrieval sufficiency check (reuse `grade_retrieval`) that can
+*escalate* to the deliberate path — making the routing decision revisable, not irreversible. When
+uncertain, deliberate.
 
 ### 4.2 Iteration / stopping policy
 Decides whether to refine after a poor grade or critique. Inputs: `RetrievalGrade`/`AnswerCritique`,
@@ -396,6 +409,12 @@ first (so later steps see a standalone query), then decompose, then per-variant 
 Output is a `TransformedQuery` whose variants carry `target_retrievers` so the planner can route.
 **Conceptual rule:** *shape the query to the tool.* The same intent becomes a hypothetical
 passage for dense search, an expanded keyword set for BM25, and a visual description for multimodal.
+**Conversation memory is a managed input, not a free variable.** `Query.conversation` cannot be
+assumed small: long chats exceed the budget, so history is truncated/summarized (default: last N turns
+verbatim + a rolling summary) — and *how* you compress it bounds what the contextualizer can resolve.
+Decide whether retrieval targets only the current rewritten turn or the conversation's accumulated
+need (both have failure modes). Session state lives in a store/cache with a lifecycle and counts
+toward cumulative cost — the per-query budget doesn't cap a whole conversation.
 
 ### 5.2 Retrieval
 Tools run **in parallel** (independent I/O). Each returns `ScoredChunk[]` with `rank`. We keep
@@ -426,21 +445,33 @@ five near-identical passages) → **compress** (optional: extract only query-rel
 or LLMLingua-style token pruning) → **order** (place strongest evidence at the head and tail to
 counter "lost in the middle") → **number** (assign `cite_id`) → **fit budget** (drop weakest
 until under token cap). Output `Context` is the only thing the generator sees.
+**Hierarchical (parent-child) option.** The unit *retrieved/embedded* need not be the unit *given to
+the generator*: a context builder can resolve small matched chunks up to their larger parent (or merge
+a window of neighbors) — parent-document / auto-merging / sentence-window retrieval. Pair with the
+ingestion-side hierarchical chunker (ingestion ARCHITECTURE §4.7); it's the structural answer to the
+precision-vs-context trade-off that overlap only softens.
 
 ### 5.6 Generation
 `AnswerGeneratorPort` prompts `llm.answer` with: the (possibly decomposed) question, the numbered
 context, and explicit instructions to *answer only from context* and *cite `cite_id`s*. Use
-structured output to return `{text, citations[]}` so citations are machine-checkable. Stream the
-text for UX. If decomposition was used, generate per sub-answer then synthesize.
+structured output to return `{text, citations[]}` so citations are machine-checkable. If decomposition
+was used, generate per sub-answer then synthesize.
+**Perceived latency.** Streaming the final answer only helps *once generation starts*; on the
+deliberate path most wall-clock time is the *pre-generation* chain (transform → plan → retrieve →
+grade). Mitigate with **progressive disclosure** — stream the intermediate `QueryTrace` steps
+("rewriting… searching 3 sources… checking results…") so the user sees motion — then stream the
+answer. The budget's latency ceiling bounds the worst case; this addresses the *felt* latency.
 
 ### 5.7 Reflection / corrective loop
-Two gates via `CritiquePort`:
+Three gates via `CritiquePort` (+ `GuardrailPort`):
 - **Retrieval grade** (before generating): is the evidence sufficient? what's missing? → drives
   refinement (Corrective-RAG / Self-RAG style).
 - **Answer critique** (after generating): is every claim grounded in a cited block; does it
   answer the question? → at most one corrective re-retrieval, then finalize honestly.
-Both are bounded by the budget policy. Faithfulness can use LLM-as-judge or a cheaper NLI model
-that checks entailment of each sentence against its cited blocks.
+- **Output safety** (before returning): PII-in-answer, harmful-use refusal, injection-fallout — a
+  faithful answer can still be unsafe, so this gate is independent of the faithfulness check.
+Both correction gates are bounded by the budget policy. Faithfulness can use LLM-as-judge or a cheaper
+NLI model that checks entailment of each sentence against its cited blocks.
 
 ---
 
@@ -455,11 +486,25 @@ that checks entailment of each sentence against its cited blocks.
   gap in the trace; if the answer LLM fails, fall back to the utility LLM.
 - **Determinism for tests.** `ClockPort`, fixed seeds, and fake adapters let the entire agent run
   offline and reproducibly.
-- **Observability (`TelemetryPort`).** Every step emits a span with inputs/outputs hashes,
-  scores, latency, and token counts, assembled into a `QueryTrace`. This *is* the eval dataset.
+- **Observability, monitoring & drift.** Every step emits a span (input/output hashes, scores,
+  latency, tokens) assembled into a `QueryTrace` — this *is* the eval dataset *and* the live monitoring
+  feed. Offline eval guards *changes*; production monitoring guards *operation*: SLOs (p95 latency,
+  token spend), and alerting on rising `grade_retrieval`-insufficient / abstention rates (query drift),
+  corpus drift, and silent hosted-model updates that break the parity invariant.
+- **Prompt-injection / untrusted content.** Retrieved chunks are attacker-controllable (the ingestion
+  side fetches them; ingestion ARCHITECTURE §6). Treat retrieved text as **data-never-instructions**:
+  delimit/spotlight it in every prompt, never let it drive tool-use decisions, and keep the §5.7 output
+  gate as the backstop when a poisoned passage still influences the generator.
+- **Feedback loop (`FeedbackPort`).** Attach an outcome (thumbs/click/edit/abandon) to each
+  `QueryTrace`; the sink feeds golden-set growth, fusion/rerank tuning, and online quality monitoring.
+  Feedback is user data — same ACL/PII care as the corpus.
+- **Prompt management.** The 10+ behavior-defining prompts (rewrite/HyDE/decompose/grade/critique/
+  generate) are versioned, reviewed application-layer artifacts pinned in the eval RunManifest — not
+  string literals in adapters (see IMPLEMENTATION §3, `prompts/`).
 - **Security/privacy.** Metadata filters can enforce per-user document ACLs at retrieval time
   (push filters into the stores, never filter after generation). PII redaction is a context-build
-  sub-step. Local LLM/embedder adapters exist for data-residency requirements.
+  sub-step *and* an output-gate check (§5.7); the ingestion-side redaction can't catch PII entered via
+  the query or synthesized across chunks. Local LLM/embedder adapters exist for data-residency.
 
 ---
 

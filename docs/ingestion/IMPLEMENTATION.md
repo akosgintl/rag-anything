@@ -71,6 +71,9 @@ ingestion/
       chunking.py  idempotency.py  retry.py  dedup.py
     enrichers/             # EnricherPort implementations
       metadata.py  summarize.py  contextualize.py  pii_redact.py
+    prompts/               # versioned, reviewed prompt artifacts for the LLM/VLM enrichers
+                           # (caption, contextualize, metadata-extract...) — application-layer,
+                           # not buried in adapters; pinned in the eval RunManifest
 
   adapters/               # only layer importing SDKs
     connectors/{youtube,web_firecrawl,document}.py
@@ -212,7 +215,11 @@ wire `TelemetryPort` minimally from Phase 0.
 - **External cost centers** — ASR, VLM captioning, embeddings — run behind caches and rate gates;
   the ledger guarantees at-most-once processing per unchanged unit.
 - **Scheduling** — batch backfills + incremental scheduled runs (e.g., recrawl feeds, new videos);
-  webhooks/streaming optional for near-real-time sources.
+  webhooks/streaming optional for near-real-time sources. Re-crawl cadence follows each source's
+  freshness policy, not a global timer.
+- **Reindex/migration** — embedder or `schema_version` upgrades run as a versioned blue-green
+  backfill from the stored normalized-doc blobs (no re-fetch), evaluated on the golden set before the
+  query side cuts over; never an in-place swap (the parity invariant forbids it).
 - **Secrets** — site credentials and API keys from the vault, scoped per domain, short-lived.
 
 ---
