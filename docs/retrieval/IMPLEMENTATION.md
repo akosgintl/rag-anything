@@ -21,20 +21,43 @@ not line-by-line code. Each phase ends with something runnable.
 
 ## 2. Suggested stack (all swappable)
 
-| Concern | Pragmatic default | Why | Swap to |
-|---------|-------------------|-----|---------|
-| Language | Python (typed) or TypeScript | richest RAG/LLM ecosystem | either; ports are language-neutral |
-| API | FastAPI / ASGI (or Fastify) | async fan-out, streaming | gRPC for service mesh |
-| DI | constructor injection + a small container | explicit, testable | a DI framework if preferred |
-| Vector DB | Qdrant | filters + payload + hybrid, easy local | pgvector, Milvus, Weaviate, FAISS |
-| BM25 | OpenSearch | mature, filters, scale | Tantivy, `rank_bm25` for a prototype |
-| Text embeddings | BGE / E5 (self-host) or OpenAI | quality vs. cost | Jina, GTE |
-| Multimodal | Jina-CLIP / SigLIP | shared text-image space | OpenCLIP, Cohere multimodal |
-| Reranker | Cohere Rerank or bge-reranker (local) | big quality jump | ColBERT, LLM listwise |
-| LLM | hosted (answer) + small model (utility) | role routing | vLLM/Ollama local |
-| Cache | Redis | embeddings/results/LLM calls | in-proc LRU for prototype |
-| Telemetry | OpenTelemetry + a trace store | spans = eval data | vendor APM, LangSmith-style tracer |
-| Eval | RAGAS-style metrics + a golden set | attributable quality | custom harness |
+**How to read this.** Python only; **local development stack only**. Each concern has one local-dev
+default and the open-standard *swap contract* (the port) that keeps it replaceable.
+
+- **Local-first with Docker.** Everything that can run in `docker-compose` does; in local dev the
+  **only** network calls are **LLM and embedding** APIs (and embeddings can self-host via TEI to go
+  fully offline).
+- **One backbone.** The query side **reads** the same **Supabase / Postgres** backbone the ingestion
+  side populates (text/image vector, keyword, cache) — the embedder **parity invariant** is what
+  makes that shared store correct. It is not a second store.
+- **Deployment beyond the laptop** — the CLI · cloud-agnostic · **AWS · GCP · Azure** options for
+  every component, and the **rationale for each choice** (e.g. native-Python vs Prefect vs Temporal;
+  Opik vs Langfuse), live in [`../shared/DEPLOYMENT.md`](../shared/DEPLOYMENT.md).
+
+### 2a. Stateful backbone — read view (local dev)
+
+The query side reads what ingestion wrote; this is the same backbone, not a second store.
+
+| Concern (port) | Local dev default | Swap contract |
+|----------------|-------------------|---------------|
+| Text vector search (`search` / `retriever_tool`) | `pgvector` + `pgvectorscale` | `VectorSearchPort` + embedder parity |
+| Image vector search (`search`) | `pgvector` (separate collection) | same |
+| Keyword / BM25 (`search`) | ParadeDB `pg_search` (+ RRF) | `KeywordSearchPort` |
+| Cache (`cache`) | in-proc LRU + Postgres | cache port (RESP) |
+
+### 2b. Compute & models (local dev)
+
+| Concern (port) | Local dev default | Swap contract |
+|----------------|-------------------|---------------|
+| Language | Python (typed) | — |
+| API | FastAPI / ASGI | ASGI; gRPC for service mesh |
+| DI | constructor injection + small container | explicit wiring |
+| Text embeddings (`embedder`) | BGE / E5 via HF TEI | `TextEmbedderPort` — **parity invariant** |
+| Multimodal (`embedder`) | Jina-CLIP via HF TEI | `MultimodalEmbedderPort` |
+| Reranker (`reranker`) | bge-reranker via HF TEI | `RerankerPort` |
+| LLM (`llm`) | hosted via LiteLLM — online (Claude / GPT / Gemini), answer + utility roles | `LLMPort` — **OpenAI-compatible API / LiteLLM** swap point |
+| Telemetry (`telemetry`) | OpenTelemetry → trace store | **OpenTelemetry** |
+| LLM obs + eval | Opik (Comet, self-host) | OTel traces + RAGAS / DeepEval |
 
 > Frameworks (LangGraph, LlamaIndex, Haystack) can implement the agent loop, but keep them
 > **behind the Application layer** as an orchestration adapter — do not let framework types
@@ -197,6 +220,9 @@ data source for all system-level metrics, so wire `TelemetryPort` minimally even
 ---
 
 ## 7. Deployment notes (high level)
+
+> See [`../shared/DEPLOYMENT.md`](../shared/DEPLOYMENT.md) for the per-component CLI / cloud-agnostic
+> / AWS / GCP / Azure matrix and the rationale for each choice.
 
 - **Query service** (stateless, scales horizontally): API + agent + adapter clients.
 - **Stateful backends**: vector DB, BM25 store, Redis — run/managed separately.

@@ -27,22 +27,54 @@ a domain core.
 
 ## 2. Suggested stack (all swappable)
 
-| Concern | Pragmatic default | Why | Swap to |
-|---------|-------------------|-----|---------|
-| Language | Python (typed) | richest parsing/ASR/LLM ecosystem | TS where the query side is TS |
-| Orchestration | a DAG/workflow runner (Prefect/Dagster/Airflow) or a job queue | retries, scheduling, observability | plain async batch for prototype |
-| YouTube transcript | captions API → Whisper ASR fallback | cheap-when-present, robust | hosted STT |
-| Web fetch | Firecrawl | clean md + JS + auth + crawl | Playwright; readability |
-| PDF → markdown | Docling | tables/structure/images, OSS | Marker, Unstructured, LlamaParse, Azure DI |
-| OCR | Tesseract | local, free | cloud OCR for accuracy |
-| Captioning | a VLM (Claude / GPT-4o) | quality captions w/ context | local LLaVA |
-| Embedders | **same as query side** | parity invariant | (must match) |
-| Index writers | Qdrant + OpenSearch | mirror query side | pgvector/Milvus; Elasticsearch |
-| Blob store | object storage (S3/GCS) | durable md + images | local FS (prototype) |
-| Ledger | Postgres | idempotency/lineage/status | any DB/KV |
-| Secrets | a vault (cloud secrets mgr) | site creds & API keys | env-injected for prototype |
-| Cache | Redis | dedupe expensive ASR/VLM/embed | in-proc LRU (prototype) |
-| Telemetry | OpenTelemetry | per-stage spans = eval data | vendor APM |
+**How to read this.** Python only; **local development stack only**. Each concern has one local-dev
+default and the open-standard *swap contract* (the port) that keeps it replaceable.
+
+- **Local-first with Docker.** Everything that can run in `docker-compose` does; in local dev the
+  **only** network calls are **LLM and embedding** APIs (and embeddings can self-host via TEI to go
+  fully offline). A captioning VLM and the Gemini YouTube transcription are themselves LLM calls, so
+  they fall under that same "online model" bucket.
+- **One backbone.** In local dev *all* state lives in a single **Supabase / Postgres** engine —
+  ledger + vector + BM25 + blob + cache + **job queue via `pgmq`** + secrets — one stack, no separate
+  broker or orchestrator. The processing tools and models are stateless adapters on top.
+- **Deployment beyond the laptop** — the CLI · cloud-agnostic · **AWS · GCP · Azure** options for
+  every component, and the **rationale for each choice** (e.g. native-Python vs Prefect vs Temporal;
+  Opik vs Langfuse), live in [`../shared/DEPLOYMENT.md`](../shared/DEPLOYMENT.md).
+
+### 2a. Stateful backbone (local dev)
+
+One engine behind the storage / index / ledger / queue / secret ports.
+
+| Concern (port) | Local dev default | Swap contract |
+|----------------|-------------------|---------------|
+| Relational ledger (`ledger`) | Postgres (Supabase) | Postgres wire + Alembic |
+| Text vector store (`index_writer`) | `pgvector` + `pgvectorscale` | ANN index port + embedder parity |
+| Image vector store (`index_writer`) | `pgvector` (separate collection) | same |
+| Keyword / BM25 (`index_writer`) | ParadeDB `pg_search` (+ RRF) | keyword index port |
+| Blob store (`document_store`) | Supabase Storage (S3 API) | **S3 API** (boto3 + endpoint URL) |
+| Cache / dedupe (`dedup`) | in-proc LRU + Postgres | cache port (RESP) |
+| Job queue (task handoff) | `pgmq` | queue / orchestrator port |
+| Secrets | Supabase Vault / `.env` | thin `get_secret()` wrapper |
+
+### 2b. Stateless processing & models (local dev)
+
+Native-CLI tools (poppler, MuPDF, Ghostscript, libvips, ffmpeg, yt-dlp) are single binaries,
+multithreaded and embarrassingly parallel — fan out per file with GNU `parallel` / `xargs -P
+$(nproc)`. Models stay online (or self-host via vLLM / TEI).
+
+| Concern (port) | Local dev default | Swap contract |
+|----------------|-------------------|---------------|
+| Language | Python (typed) | — |
+| PDF → markdown (`extractor`) | Docling (built-in Tesseract OCR) | `Extractor` → `NormalizedDocument` |
+| OCR (`ocr`) | Tesseract (Docling's default engine) | `OcrPort` (text + conf + bbox) |
+| Media preprocessing (native CLI) | ffmpeg + libvips + yt-dlp | behind `extractor` / media ports |
+| Web fetch (`web_fetcher`) | Firecrawl (self-host) | `WebFetcher` → clean markdown |
+| YouTube transcript (`transcript`) | Gemini native YouTube-URL transcription (`google-genai`, `file_uri`) | `TranscriptPort` (text + segment timestamps) |
+| Captioning / VLM (`vision_captioner`) | Gemini (multimodal) | `VisionCaptioner` port |
+| Text embedders (`embedder`) | BGE / E5 via HF TEI | `TextEmbedderPort` — **parity invariant** |
+| Multimodal embedders (`embedder`) | Jina-CLIP via HF TEI | `MultimodalEmbedderPort` — parity |
+| Telemetry (`telemetry`) | OpenTelemetry → Grafana LGTM | **OpenTelemetry** SDK |
+| LLM trace / eval | Opik (Comet, self-host) | OTel traces + RAGAS / DeepEval |
 
 > A framework (LlamaIndex/Unstructured pipelines) may implement stages, but keep it **behind the
 > Application ports** — never let framework types leak into the domain, or you lose swap-ability.
@@ -208,6 +240,9 @@ wire `TelemetryPort` minimally from Phase 0.
 ---
 
 ## 7. Deployment notes (high level)
+
+> See [`../shared/DEPLOYMENT.md`](../shared/DEPLOYMENT.md) for the per-component CLI / cloud-agnostic
+> / AWS / GCP / Azure matrix and the rationale for each choice.
 
 - **Ingestion workers** (stateless, scale horizontally) pull sources from a queue and run the DAG.
 - **Stateful backends** — vector stores, BM25, blob store, ledger DB, Redis — shared with / adjacent
