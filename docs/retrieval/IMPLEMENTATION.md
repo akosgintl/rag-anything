@@ -47,7 +47,9 @@ not line-by-line code. Each phase ends with something runnable.
 ```
 src/
   domain/                 # pure entities & value objects (ARCHITECTURE §2). No imports out.
-    query.py  chunk.py  result.py  context.py  answer.py  verdicts.py  trace.py
+    query.py  result.py  context.py  answer.py  verdicts.py  trace.py
+    # shared types (Chunk, Metadata, Provenance, Anchor, TextSpan, Modality, Embedding) are
+    # IMPORTED from the shared domain package (../shared/DATA_MODEL.md), not redefined here
 
   application/
     ports/                # the interfaces (ARCHITECTURE §3)

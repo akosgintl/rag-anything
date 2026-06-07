@@ -65,16 +65,20 @@ test with fakes, and reason about behavior independent of infrastructure churn.
 
 ## 2. Domain model
 
-Pure entities and value objects. No dependencies. Provenance is first-class so that fusion,
-reranking, and citation can all reason about *where* a result came from.
+Pure entities and value objects. No dependencies. The **shared types** — `Chunk`, `Metadata`,
+`Provenance`, `Anchor`, `TextSpan`, `Modality`, `Embedding` — are defined once in the canonical
+contract, [`../shared/DATA_MODEL.md`](../shared/DATA_MODEL.md), and imported (not re-declared here);
+`Chunk` carries a typed `Metadata` and an `Anchor`, which is what lets citation reason about *where* a
+result came from. The types below are the **retrieval-only** entities; they reference the shared types.
 
 ```text
-# Value objects
+# Shared types (canonical defs in ../shared/DATA_MODEL.md):
+#   Chunk, Metadata, Provenance, Anchor, TextSpan, Modality, Embedding
+
+# Retrieval-only value objects
 RetrieverId        = enum/string  # "dense_text" | "bm25" | "multimodal" | ...
-Modality           = enum         # TEXT | IMAGE
-Embedding          = float[]      # opaque vector
 Score              = float        # retriever-local, not comparable across retrievers
-MetadataFilter     = structured predicate (field, op, value)
+MetadataFilter     = structured predicate (field, op, value)   # over Metadata fields
 
 # Core entities
 Query {
@@ -95,15 +99,6 @@ QueryVariant {
   filters: MetadataFilter[]
 }
 
-Chunk {
-  id: string
-  doc_id: string
-  modality: Modality
-  content: string                 # text, or caption/OCR for images
-  image_ref: URI?                 # if modality == IMAGE
-  metadata: map                   # source, title, section, page, date, ...
-}
-
 ScoredChunk {                     # a retrieval candidate WITH provenance
   chunk: Chunk
   retriever: RetrieverId
@@ -118,6 +113,8 @@ ContextBlock { chunk: Chunk; cite_id: int }   # numbered for citation
 Context      { blocks: ContextBlock[]; token_count: int }
 
 Citation { cite_id: int; doc_id: string; chunk_id: string; span: TextSpan? }
+           # coarse location is the cited chunk's shared Anchor (page/timestamp/heading);
+           # span optionally narrows to a sub-range within the chunk (shared TextSpan)
 Answer   { text: string; citations: Citation[]; confidence: float? }
 
 # Verdicts produced by grading/critique

@@ -132,12 +132,13 @@ and which run on the fast vs. deliberate path.
 ## 6. Ingestion (context only)
 
 Although the live system is the query path, it assumes an ingestion pipeline produced the
-indices. Conceptually: **parse → chunk (with overlap and structure awareness) → enrich
+indices. That pipeline is documented in full in the [ingestion docs](../ingestion/README.md);
+conceptually: **parse → chunk (with overlap and structure awareness) → enrich
 (titles, summaries, metadata) → embed (text + image) → index (vector store + BM25 + image
-store)**. Chunking strategy, multi-vector indexing, and image captioning are discussed as
-alternatives in [`ARCHITECTURE.md`](./ARCHITECTURE.md). Keeping ingestion behind the same
-embedder/store ports means the *exact* models used to index can be guaranteed identical to
-those used at query time (a common source of silent quality loss).
+store)**. Keeping ingestion behind the same embedder/store ports — and on the same shared domain
+contract, [`../shared/DATA_MODEL.md`](../shared/DATA_MODEL.md) — means the *exact* models and types
+used to index are guaranteed identical to those used at query time (a common source of silent
+quality loss).
 
 ---
 
@@ -166,6 +167,9 @@ The agent runtime lives in **Application** and speaks only to ports: `LLMPort`,
 your vector DB is a one-line change there; the agent code never notices.
 
 Full port catalog, signatures, and per-port alternatives: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+The domain types this system shares with ingestion (`Chunk`, `Metadata`, `Provenance`, the embedder
+ports) are defined canonically in [`../shared/DATA_MODEL.md`](../shared/DATA_MODEL.md) — imported by
+both systems, re-declared by neither.
 
 ---
 

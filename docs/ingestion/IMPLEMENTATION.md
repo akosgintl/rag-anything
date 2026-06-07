@@ -19,7 +19,8 @@ a domain core.
 4. **Fakes from day one.** Every port ships an in-memory fake (fake connector returning a fixed
    doc, echo captioner, in-memory index) so the pipeline runs in tests with zero network.
 5. **Share the core with the query side.** `Chunk`, `Metadata`, `Provenance`, and the embedder
-   ports are imported from the shared domain package — not re-declared — so index/query parity is
+   ports are imported from the shared domain package (canonical contract:
+   [`../shared/DATA_MODEL.md`](../shared/DATA_MODEL.md)) — not re-declared — so index/query parity is
    structural, not a documentation promise.
 
 ---
@@ -52,7 +53,9 @@ a domain core.
 
 ```
 ingestion/
-  domain/                 # imports the SHARED domain package for Chunk/Metadata/Provenance
+  domain/                 # ingestion-only entities; shared types (Chunk/Metadata/Provenance/
+                          # Anchor/Embedding) imported from the shared domain package
+                          # (canonical contract: ../shared/DATA_MODEL.md), not redefined
     normalized_document.py  media_asset.py  raw_asset.py  source_ref.py
     embedded_chunk.py  ingestion_record.py
 

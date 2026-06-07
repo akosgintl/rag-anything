@@ -107,19 +107,18 @@ Index:          EmbeddedChunk[]      -> IndexReceipt
 
 ## 3. Domain model
 
-Pure entities. `Chunk`, `Metadata`, and `Provenance` are the **same** types the query system
-indexes and cites, guaranteeing compatibility.
+Pure entities. The **shared types** — `Chunk`, `Metadata`, `Provenance`, `Anchor`, `Modality`,
+`Embedding` — are defined once in the canonical contract,
+[`../shared/DATA_MODEL.md`](../shared/DATA_MODEL.md), and imported by both systems (not re-declared
+here). They are the *same* types the query system indexes and cites, which is what guarantees
+compatibility. The types below are the **ingestion-only** entities; they reference the shared types.
 
 ```text
-# Identity & provenance
-SourceRef   { kind: enum(YOUTUBE|WEB|DOCUMENT); locator: string; hints: map }  # URL / path / video id
-Provenance  { source_id; connector: string; content_hash; fetched_at;
-              anchors: Anchor[] }                       # how to trace a chunk home
-Anchor      { kind: enum(HEADING|PAGE|TIMESTAMP|CHAR_SPAN); value }
-Metadata    { title; author?; published_at?; language?; source_type;
-              access_level; tags: string[]; extra: map }  # used by query-side filters & ACLs
+# Shared types (canonical defs in ../shared/DATA_MODEL.md):
+#   Chunk, Metadata, Provenance, Anchor, Modality, Embedding
 
-# Acquisition output
+# Identity & acquisition
+SourceRef   { kind: enum(YOUTUBE|WEB|DOCUMENT); locator: string; hints: map }  # URL / path / video id
 RawAsset    { kind: enum(HTML|MARKDOWN|PDF|TEXT|TRANSCRIPT|IMAGE|MEDIA);
               bytes/URI; mime; meta: map }
 
@@ -131,16 +130,14 @@ NormalizedDocument {
   media: MediaAsset[]; metadata: Metadata; provenance: Provenance; anchors: Anchor[]
 }
 
-# Chunking & embedding (Chunk shared with query side)
-Chunk        { id; doc_id; modality: enum(TEXT|IMAGE); content: string;
-               image_ref: URI?; anchor: Anchor; metadata: Metadata }
+# Chunking & embedding (Chunk is shared; EmbeddedChunk is ingestion-only / write-path)
 EmbeddedChunk{ chunk: Chunk; text_vector: Embedding?; image_vector: Embedding?;
                keyword_text: string }                  # what goes to BM25
 
 # Bookkeeping
 IndexReceipt { doc_id; chunk_ids: string[]; stores_written: string[] }
 IngestionRecord { source_id; content_hash; status: enum(OK|QUARANTINED|SKIPPED);
-                  receipt?; error?; timings: map }      # the ledger row
+                  schema_version; receipt?; error?; timings: map }   # the ledger row
 ```
 
 Design notes:

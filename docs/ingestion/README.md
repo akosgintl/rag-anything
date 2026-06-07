@@ -9,8 +9,10 @@
 This README is the conceptual entry point. Structural detail is in
 [`ARCHITECTURE.md`](./ARCHITECTURE.md); the build plan is in
 [`IMPLEMENTATION.md`](./IMPLEMENTATION.md); how we measure ingestion quality is in
-[`EVALUATION.md`](./EVALUATION.md). This pipeline feeds the query-side system documented in the
-parent folder, and shares its `Chunk` entity, metadata schema, and provenance model.
+[`EVALUATION.md`](./EVALUATION.md). This pipeline feeds the
+[query-side system](../retrieval/README.md), with which it shares a domain core (`Chunk`, `Metadata`,
+`Provenance`, the embedder ports) defined canonically in
+[`../shared/DATA_MODEL.md`](../shared/DATA_MODEL.md).
 
 ---
 
@@ -194,7 +196,9 @@ A chunk that cannot be traced back to a resolvable location is a defect, caught 
 
 The same dependency rule, ports, and composition-root pattern as the query-side system. The two
 systems deliberately **share** the `Chunk` entity, the metadata schema, and the embedder ports —
-that shared core is what guarantees index/query compatibility.
+that shared core is what guarantees index/query compatibility. It is defined once, canonically, in
+[`../shared/DATA_MODEL.md`](../shared/DATA_MODEL.md) (imported by both systems, re-declared by
+neither).
 
 ---
 
