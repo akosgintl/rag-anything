@@ -9,9 +9,9 @@ Two rules make every row here a config change rather than a rewrite:
 
 1. **Everything stays behind a port.** Each component is named by the port it implements
    (`ledger`, `index_writer`, `search`, `embedder`, `reranker`, `llm`, …) — defined in
-   [retrieval/IMPLEMENTATION.md §3](../retrieval/IMPLEMENTATION.md),
-   [ingestion/IMPLEMENTATION.md §3](../ingestion/IMPLEMENTATION.md), and the shared
-   [`DATA_MODEL.md`](./DATA_MODEL.md). Swapping a deployment target = swapping one adapter.
+   [IMPLEMENTATION.md §R3](IMPLEMENTATION.md#retrieval--query-side),
+   [IMPLEMENTATION.md §I3](IMPLEMENTATION.md#ingestion--producer-side), and the shared
+   [`DATA_MODEL.md`](DATA_MODEL.md). Swapping a deployment target = swapping one adapter.
 2. **Open standards are the escape hatch.** We commit to **Postgres wire**, the **S3 API**,
    **RESP** (Redis protocol), **OpenTelemetry**, and the **OpenAI-compatible LLM API**. Any vendor
    that speaks these is interchangeable.

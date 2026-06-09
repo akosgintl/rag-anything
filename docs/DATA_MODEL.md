@@ -9,10 +9,10 @@ degrades silently — so they are defined here once, and **neither system re-dec
 Pseudocode is language-neutral and typed (the same style as the two `ARCHITECTURE.md` documents).
 Type names are entity/port names, not a language commitment.
 
-Related: [ingestion/ARCHITECTURE.md](../ingestion/ARCHITECTURE.md) §3 and
-[retrieval/ARCHITECTURE.md](../retrieval/ARCHITECTURE.md) §2 consume these types and add their own
-system-specific ones; the embedder **parity invariant** that this contract depends on is described in
-both (ingestion ARCHITECTURE §4.8, retrieval ARCHITECTURE §3.2).
+Related: [ARCHITECTURE.md (Ingestion)](ARCHITECTURE.md#ingestion--producer-side) §I3 and
+[ARCHITECTURE.md (Retrieval)](ARCHITECTURE.md#retrieval--query-side) §R2 consume these types and add
+their own system-specific ones; the embedder **parity invariant** that this contract depends on is
+described in both (ingestion ARCHITECTURE §I4.8, retrieval ARCHITECTURE §R3.2).
 
 ---
 
@@ -113,7 +113,7 @@ A chunk links to its provenance via `Chunk.doc_id`; it does not embed the whole 
 The keystone shared entity — the unit ingestion indexes and retrieval ranks and cites. An image is
 represented as `Chunk(modality=IMAGE)` carrying its caption/OCR text in `content` (for keyword + text
 retrieval) and its pixels referenced by `image_ref` (for multimodal retrieval); see triple-indexing
-in [ingestion/README.md](../ingestion/README.md) §6.
+in [README.md (Ingestion)](README.md#ingestion--producer-side) §I6.
 
 ```text
 Chunk {
@@ -134,7 +134,7 @@ document's full anchor set; `Chunk.anchor` is this chunk's specific one.
 
 `EmbeddedChunk` (chunk + its vectors + `keyword_text`) is an **ingestion-only derived type** — it
 exists only on the write path and is *not* part of the shared contract. It is defined in
-[ingestion/ARCHITECTURE.md](../ingestion/ARCHITECTURE.md) §3.
+[ARCHITECTURE.md (Ingestion)](ARCHITECTURE.md#ingestion--producer-side) §I3.
 
 ---
 
@@ -145,7 +145,7 @@ exists only on the write path and is *not* part of the shared contract. It is de
 - **Deterministic & content-derived.** Ids are derived deterministically (e.g. from `content_hash` +
   position) so that re-ingesting unchanged content yields the *same* ids — this is what makes index
   upserts idempotent and lets changed chunks supersede their predecessors. See
-  [ingestion/README.md](../ingestion/README.md) §10.
+  [README.md (Ingestion)](README.md#ingestion--producer-side) §I10.
 - **Stable across stores.** The same `Chunk.id` keys the text vector store, the image vector store,
   and the BM25 index, so the three stores reconcile and a citation resolves uniformly.
 

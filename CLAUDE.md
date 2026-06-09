@@ -14,21 +14,25 @@ matching the layout and conventions in the IMPLEMENTATION.md files over inventin
 
 Two cooperating RAG systems built on **Clean Architecture**, documented in parallel:
 
-- **Retrieval / query side** ([docs/retrieval/](docs/retrieval/)) — a query-adaptive *agentic* RAG
+- **Retrieval / query side** ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#retrieval--query-side)) — a
+  query-adaptive *agentic* RAG
   system. A router sends each query down a cheap deterministic *fast path* or a fully agentic
   *deliberate path* (transform → plan → retrieve → fuse → rerank → grade → loop → generate →
   critique). Orchestrates three retrievers (dense text, BM25, multimodal) behind one
   `RetrieverTool` abstraction.
-- **Ingestion / producer side** ([docs/ingestion/](docs/ingestion/)) — the offline/batch pipeline
+- **Ingestion / producer side** ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#ingestion--producer-side)) — the
+  offline/batch pipeline
   that feeds the three stores the query side reads. Acquires heterogeneous sources (YouTube, web
   pages incl. auth-gated, documents/PDF), normalizes everything to a single `NormalizedDocument`
   (canonical Markdown + media manifest + metadata + provenance), then chunks → enriches → embeds →
   indexes.
 
-Each side has four docs: `README.md` (concept), `ARCHITECTURE.md` (ports, domain model, control
-flow, trade-offs), `IMPLEMENTATION.md` (stack, phased build plan, module layout), `EVALUATION.md`
-(quality harness). Read the relevant `ARCHITECTURE.md` before implementing any port or stage — it
-specifies the exact entities, interfaces, and defaults.
+The docs are flat under [docs/](docs/): `README.md` (concept), `ARCHITECTURE.md` (ports, domain
+model, control flow, trade-offs), `IMPLEMENTATION.md` (stack, phased build plan, module layout),
+`EVALUATION.md` (quality harness), plus `DATA_MODEL.md` (the shared contract) and `DEPLOYMENT.md`.
+Each of the first four is organized as a whole-system **Part I**, then an **Ingestion** part
+(sections `I…`) and a **Retrieval** part (sections `R…`). Read the relevant `ARCHITECTURE.md` part
+before implementing any port or stage — it specifies the exact entities, interfaces, and defaults.
 
 ## Architecture rules that must hold across all code
 
@@ -81,8 +85,8 @@ These are load-bearing invariants, not style preferences. Most edits will be wro
 
 ## Planned module layout
 
-When building, follow the layouts in [docs/retrieval/IMPLEMENTATION.md §3](docs/retrieval/IMPLEMENTATION.md)
-and [docs/ingestion/IMPLEMENTATION.md §3](docs/ingestion/IMPLEMENTATION.md). Both use
+When building, follow the layouts in [docs/IMPLEMENTATION.md §R3](docs/IMPLEMENTATION.md#retrieval--query-side)
+and [docs/IMPLEMENTATION.md §I3](docs/IMPLEMENTATION.md#ingestion--producer-side). Both use
 `domain/` → `application/{ports,usecases,policies,...}` → `adapters/` (SDK imports here) →
 `infrastructure/` (container, config, entrypoint), with `tests/{fakes,unit,integration,eval,fixtures}`.
 
