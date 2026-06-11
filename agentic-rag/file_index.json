@@ -1,0 +1,50 @@
+[
+  {
+    "file": "00_README.md",
+    "bytes": 3737
+  },
+  {
+    "file": "01_architecture_overview.md",
+    "bytes": 10844
+  },
+  {
+    "file": "02_component_relationships.md",
+    "bytes": 8997
+  },
+  {
+    "file": "03_canonical_data_model.md",
+    "bytes": 15324
+  },
+  {
+    "file": "04_data_flow.md",
+    "bytes": 10412
+  },
+  {
+    "file": "05_development_docker_blueprint.md",
+    "bytes": 9649
+  },
+  {
+    "file": "06_production_reference_architecture.md",
+    "bytes": 10440
+  },
+  {
+    "file": "07_cloud_provider_mappings.md",
+    "bytes": 13904
+  },
+  {
+    "file": "08_security_governance_observability.md",
+    "bytes": 10222
+  },
+  {
+    "file": "09_implementation_plan.md",
+    "bytes": 10249
+  },
+  {
+    "file": "10_decision_log_and_backlog.md",
+    "bytes": 6561
+  },
+  {
+    "file": "11_references.md",
+    "bytes": 1688
+  }
+]
